@@ -1,13 +1,16 @@
 import time
 import openai
+import os
 from modal import method
+from dotenv import load_dotenv
 from .common import stub
 
 # Set the model name to gpt-3.5-turbo
 MODEL_NAME = "gpt-3.5-turbo"
 
 # Authenticate OpenAI
-openai.api_key = "your-api-key"
+load_dotenv()
+openai.api_key = os.getenv("OPENAI_KEY")
 
 @stub.cls(container_idle_timeout=300)
 class GPT35Turbo:
