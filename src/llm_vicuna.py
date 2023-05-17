@@ -12,7 +12,7 @@ openai.api_key = "your-api-key"
 @stub.cls(container_idle_timeout=300)
 class GPT35Turbo:
     def __enter__(self):
-        self.tokenizer = AutoTokenizer.from_pretrained(MODEL_NAME)
+        self.tokenizer = openai.GPT3Tokenizer()  # Update this line
         print(f"Model loaded in {time.time() - t0:.2f}s")
 
     @method()
@@ -43,6 +43,11 @@ class GPT35Turbo:
         yield output
 
         print(f"Output generated in {time.time() - t0:.2f}s")
+
+    # Add a new method for handling a single input message
+    @method()
+    async def send_message(self, message):
+        return self.generate(message)
 
 # For local testing, run `modal run -q src.llm_vicuna --input "Where is the best sushi in New York?"`
 @stub.local_entrypoint()
