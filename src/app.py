@@ -9,14 +9,13 @@ from pathlib import Path
 from modal import Mount, asgi_app
 
 from .common import stub
-from .llm_vicuna import Vicuna
+from .gpt_3_5_turbo import GPT35Turbo
 from .transcriber import Whisper
 from .tts import Tortoise
 
 static_path = Path(__file__).with_name("frontend").resolve()
 
 PUNCTUATION = [".", "?", "!", ":", ";", "*"]
-
 
 @stub.function(
     mounts=[Mount.from_local_dir(static_path, remote_path="/assets")],
@@ -31,7 +30,7 @@ def web():
 
     web_app = FastAPI()
     transcriber = Whisper()
-    llm = Vicuna()
+    llm = GPT35Turbo()
     tts = Tortoise()
 
     @web_app.post("/transcribe")
