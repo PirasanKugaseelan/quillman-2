@@ -8,12 +8,12 @@ import os
 import openai  # New import
 
 from modal import Image, method
-
+from dotenv import load_dotenv
 from .common import stub
 from .gpt_3_5 import GPT35Turbo  # Import GPT-3.5 Turbo class
 
 MODEL_NAME = "base.en"
-
+load_dotenv()
 openai.api_key = os.getenv('OPENAI_API_KEY')  # Set OpenAI API key
 
 
