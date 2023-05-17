@@ -9,7 +9,7 @@ from pathlib import Path
 from modal import Mount, asgi_app
 
 from .common import stub
-from .gpt_3_5_turbo import GPT35Turbo
+from .llm_vicuna import GPT35Turbo
 from .transcriber import Whisper
 from .tts import Tortoise
 
