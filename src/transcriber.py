@@ -1,15 +1,20 @@
 """
-Speech-to-text transcriptiong service based on OpenAI Whisper.
+Speech-to-text transcription service based on OpenAI Whisper.
 """
 
 import tempfile
 import time
+import os
+import openai  # New import
 
 from modal import Image, method
 
 from .common import stub
+from .gpt_3_5 import GPT35Turbo  # Import GPT-3.5 Turbo class
 
 MODEL_NAME = "base.en"
+
+openai.api_key = os.getenv('OPENAI_API_KEY')  # Set OpenAI API key
 
 
 def download_model():
@@ -74,15 +79,22 @@ class Whisper:
         self.use_gpu = torch.cuda.is_available()
         device = "cuda" if self.use_gpu else "cpu"
         self.model = whisper.load_model(MODEL_NAME, device=device)
+        self.gpt35turbo = GPT35Turbo()  # Initialize GPT-3.5 Turbo
 
     @method()
-    def transcribe_segment(
+    def transcribe_and_respond(
         self,
         audio_data: bytes,
     ):
         t0 = time.time()
         np_array = load_audio(audio_data)
-        result = self.model.transcribe(np_array, language="en", fp16=self.use_gpu)  # type: ignore
+        transcript = self.model.transcribe(np_array, language="en", fp16=self.use_gpu)  # type: ignore
         print(f"Transcribed in {time.time() - t0:.2f}s")
 
-        return result
+        # Use the transcription in the chat model
+        t1 = time.time()
+        response = self.gpt35turbo.send_message(transcript)  # Call GPT-3.5 Turbo
+        print(f"Response generated in {time.time() - t1:.2f}s")
+
+        # Return both the transcription and the response
+        return transcript, response
