@@ -409,21 +409,21 @@ class PlayQueue {
   }
 }
 
-async function* fetchGeneration(noop, input, history, isTortoiseOn) {
-  const blob = new Blob([buffer], { type: "audio/float32" });
-
-  const response = await fetch("/transcribe", {
+async function fetchPredict(data) {
+  const response = await fetch("/predict/", {
     method: "POST",
-    body: blob,
-    headers: { "Content-Type": "audio/float32" },
+    body: JSON.stringify(data),
+    headers: { "Content-Type": "application/json" },
   });
 
   if (!response.ok) {
-    console.error("Error occurred during transcription: " + response.status);
+    console.error("Error occurred during prediction: " + response.status);
   }
 
   return await response.json();
 }
+
+
 
 async function* fetchGeneration(noop, input, history, isTortoiseOn) {
   const body = noop
@@ -501,22 +501,24 @@ function App() {
       if (!noop) {
         recorderNodeRef.current.stop();
       }
-
+  
       console.log("Generating response", input, history);
 
       let firstAudioRecvd = false;
-      for await (let { type, payload } of fetchGeneration(
-        noop,
-        input,
-        history.slice(1),
-        isTortoiseOn
-      )) {
-      if (type === "text") {
-        setFullMessage((m) => m + payload);
-      } else if (type === "sentence") {
-        playQueueRef.current.add([payload, history.length + 1, false]);
+      const data = {
+        model: model,
+        inputs: {
+          text: input,
+          history: history.slice(1)
+        }
+      };
+      for await (let { type, payload } of fetchPredict(data)) {
+        if (type === "text") {
+          setFullMessage((m) => m + payload);
+        } else if (type === "sentence") {
+          playQueueRef.current.add([payload, history.length + 1, false]);
+        }
       }
-    }
 
       if (!isTortoiseOn && playQueueRef.current) {
         while (
@@ -555,10 +557,17 @@ function App() {
       if (buffer.length) {
         send("SEGMENT_RECVD");
       }
-      // TODO: these can get reordered
-      const data = await fetchTranscript(buffer);
+      // Here, you would call fetchPredict instead of fetchTranscript
+      // You need to pass the right format for data
+      const requestData = {
+        model: model,
+        inputs: {
+          text: buffer.toString() // You need to convert buffer to a string, if it's not the case
+        }
+      };
+      const responseData = await fetchPredict(requestData);
       if (buffer.length) {
-        send({ type: "TRANSCRIPT_RECVD", transcript: data });
+        send({ type: "TRANSCRIPT_RECVD", transcript: responseData });
       }
     },
     [history]
