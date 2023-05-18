@@ -1,130 +1,88 @@
+from flask import Flask, request, jsonify
+from flask_cors import CORS
+from werkzeug.utils import secure_filename
+import requests
 import json
-import httpx
+from dotenv import load_dotenv
+import os
 import openai
-from pathlib import Path
-from fastapi import FastAPI, Request, UploadFile, File
-from fastapi.responses import Response, StreamingResponse
-from fastapi.staticfiles import StaticFiles
-from modal import Stub
 
-stub = Stub(name="quillman")
+app = Flask(__name__)
+CORS(app)
 
-openai.api_key = 'your-openai-api-key'
+load_dotenv()  # take environment variables from .env.
+ELEVEN_LABS_API_KEY = os.getenv("ELEVEN_LABS_API_KEY")
+ELEVEN_LABS_VOICE_ID = os.getenv("ELEVEN_LABS_VOICE_ID")
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
-static_path = Path(__file__).with_name("frontend").resolve()
+# Configure allowed file types and maximum size (in bytes)
+app.config['UPLOAD_EXTENSIONS'] = ['.mp3', '.mp4', '.mpeg', '.mpga', '.m4a', '.wav', '.webm']
+app.config['MAX_CONTENT_LENGTH'] = 25 * 1024 * 1024  # 25MB
 
-PUNCTUATION = [".", "?", "!", ":", ";", "*"]
+openai.api_key = OPENAI_API_KEY
 
-web_app = FastAPI()
+@app.route('/transcribe', methods=['POST'])
+def transcribe():
+    if 'file' not in request.files:
+        return jsonify({'status': 'error', 'message': 'No file part in the request.'}), 400
 
-@web_app.post("/transcribe")
-async def transcribe(file: UploadFile = File(...)):
-    audio_file = await file.read()
-    transcript = openai.Audio.transcribe("whisper-1", audio_file)
-    return transcript["text"]
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'status': 'error', 'message': 'No selected file.'}), 400
 
-@web_app.post("/generate")
-async def generate(request: Request):
-    body = await request.json()
-    tts_enabled = body["tts"]
+    if file and allowed_file(file.filename):
+        filename = secure_filename(file.filename)
+        filepath = os.path.join('/tmp', filename)
+        file.save(filepath)
 
-    if "noop" in body:
-        openai.ChatCompletion.create(
-          model="gpt-3.5-turbo",
-          messages=[
-              {
-                  "role": "system",
-                  "content": "You are a helpful assistant."
-              },
-              {
-                  "role": "user",
-                  "content": ""
-              }
-          ]
-        )
-        return
+        with open(filepath, "rb") as audio_file:
+            transcript = openai.Audio.transcribe("whisper-1", audio_file)
+        
+        return jsonify({'status': 'success', 'transcript': transcript.text}), 200
 
-    async def text_to_speech(sentence):
-        url = f'https://api.elevenlabs.io/v1/text-to-speech/{voice_id}'
+    return jsonify({'status': 'error', 'message': 'Invalid file.'}), 400
 
-        headers = {
-            'accept': 'audio/mpeg',
-            'xi-api-key': 'your-xi-api-key',
-            'Content-Type': 'application/json',
-        }
+@app.route('/generate', methods=['POST'])
+def generate():
+    data = request.get_json()
+    
+    # GPT-based LLM text generation
+    gpt_headers = {
+        'Content-Type': 'application/json',
+        'Authorization': f'Bearer {OPENAI_API_KEY}',
+    }
+    gpt_data = {
+        "prompt": data.get('input', ''),
+        "max_tokens": 60
+    }
+    gpt_response = requests.post('https://api.openai.com/v1/engines/davinci-codex/completions', headers=gpt_headers, data=json.dumps(gpt_data))
+    gpt_response_data = gpt_response.json()
+    
+    generated_text = gpt_response_data.get('choices')[0].get('text')
 
-        data = {
-            'text': sentence,
-            'model_id': 'eleven_monolingual_v1',
-            'voice_settings': {
-                'stability': 0.5,
-                'similarity_boost': 0.5,
-            },
-        }
+    # Eleven Labs text-to-speech
+    eleven_labs_headers = {
+        'Content-Type': 'application/json',
+        'xi-api-key': ELEVEN_LABS_API_KEY,
+    }
+    model_id = data.get('model_id', 'eleven_monolingual_v1')
+    voice_settings = {
+        "stability": 0.5,
+        "similarity_boost": 0.5
+    }
+    eleven_labs_data = {
+        "text": generated_text,
+        "model_id": model_id,
+        "voice_settings": voice_settings
+    }
+    eleven_labs_response = requests.post(f'https://api.elevenlabs.io/v1/text-to-speech/{ELEVEN_LABS_VOICE_ID}', headers=eleven_labs_headers, data=json.dumps(eleven_labs_data))
+    eleven_labs_response_data = eleven_labs_response.json()
 
-        async with httpx.AsyncClient() as client:
-            response = await client.post(url, headers=headers, data=json.dumps(data))
+    return jsonify(eleven_labs_response_data), eleven_labs_response.status_code
 
-        # TODO: Handle the response appropriately. The response will be an audio file.
-        return response
+def allowed_file(filename):
+    return '.' in filename and \
+           filename.rsplit('.', 1)[1].lower() in app.config['UPLOAD_EXTENSIONS']
 
-    async def speak(sentence):
-        if tts_enabled:
-            try:
-                audio_file = await text_to_speech(sentence)
-                # Here, you need to handle the response, which is an audio file.
-                # You might need to convert it to a format that your frontend can handle.
-                return {
-                    'type': 'audio',
-                    'value': audio_file,
-                }
-            except Exception as e:
-                return {
-                    'type': 'error',
-                    'value': str(e),
-                }
-        else:
-            return {
-                'type': 'sentence',
-                'value': sentence,
-            }
-
-    def gen():
-        sentence = ""
-
-        response = openai.ChatCompletion.create(
-          model="gpt-3.5-turbo",
-          messages=[
-              {
-                  "role": "system",
-                  "content": "You are a helpful assistant."
-              },
-              {
-                  "role": "user",
-                  "content": body["input"]
-              }
-          ]
-        )
-        generated_text = response['choices'][0]['message']['content']
-
-        yield {"type": "text", "value": generated_text}
-
-        for p in PUNCTUATION:
-            if p in sentence:
-                prev_sentence, new_sentence = sentence.rsplit(p, 1)
-                yield speak(prev_sentence)
-                sentence = new_sentence
-
-        if sentence:
-            yield speak(sentence)
-
-    def gen_serialized():
-        for i in gen():
-            yield json.dumps(i) + "\x1e"
-            
-    return StreamingResponse(
-        gen_serialized(),
-        media_type="text/event-stream",
-    )
-
-    web_app.mount("/", StaticFiles(directory="/assets", html=True))
+if __name__ == '__main__':
+    app.run(debug=True)
